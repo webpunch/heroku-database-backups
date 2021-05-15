@@ -18,17 +18,18 @@ if [[ -z "$S3_BUCKET_PATH" ]]; then
   exit 1
 fi
 
-#install aws-cli
-curl https://s3.amazonaws.com/aws-cli/awscli-bundle.zip -o awscli-bundle.zip
-unzip awscli-bundle.zip
-chmod +x ./awscli-bundle/install
-./awscli-bundle/install -i /tmp/aws
+# install aws-cli
+#  - this will already exist if we're running the script manually from a dyno more than once
 
 BACKUP_FILE_NAME="$(date +"%Y-%m-%d-%H-%M").dump"
 
-heroku pg:backups capture $DATABASE --app $APP
 curl -o $BACKUP_FILE_NAME `heroku pg:backups:url --app $APP`
 gzip $BACKUP_FILE_NAME
 /tmp/aws/bin/aws s3 cp $BACKUP_FILE_NAME.gz s3://$S3_BUCKET_PATH/$S3_DIRECTORY_PATH/$BACKUP_FILE_NAME.gz --sse
 echo "backup $BACKUP_FILE_NAME complete"
 
+if [[ -n "$HEARTBEAT_URL" ]]; then
+  echo "Sending a request to the specified HEARTBEAT_URL that the backup was created"
+  curl $HEARTBEAT_URL
+  echo "heartbeat complete"
+fi
