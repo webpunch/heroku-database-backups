@@ -21,12 +21,40 @@ fi
 # install aws-cli
 #  - this will already exist if we're running the script manually from a dyno more than once
 
+aws_command="/tmp/bin/aws"
+
+if [[ ! -f "${aws_command}" ]]; then
+  echo "aws cli v2..."
+  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+  unzip -q awscliv2.zip
+  ./aws/install --bin-dir /tmp/bin --install-dir /tmp/aws
+fi
+
+# if the app has heroku pg:backup:schedules, we might just want to just archive the latest backup to S3
+# https://devcenter.heroku.com/articles/heroku-postgres-backups#scheduling-backups
+#
+# set ONLY_CAPTURE_TO_S3 when calling to skip database capture
+
 BACKUP_FILE_NAME="$(date +"%Y-%m-%d-%H-%M").dump"
 
+if [[ -z "$ONLY_CAPTURE_TO_S3" ]]; then
+  heroku pg:backups capture $DATABASE --app $APP
+else
+  BACKUP_FILE_NAME="archive__${BACKUP_FILE_NAME}"
+  echo " --- Skipping database capture"
+fi
+
 curl -o $BACKUP_FILE_NAME `heroku pg:backups:url --app $APP`
-gzip $BACKUP_FILE_NAME
-/tmp/aws/bin/aws s3 cp $BACKUP_FILE_NAME.gz s3://$S3_BUCKET_PATH/$S3_DIRECTORY_PATH/$BACKUP_FILE_NAME.gz --sse
-echo "backup $BACKUP_FILE_NAME complete"
+FINAL_FILE_NAME=$BACKUP_FILE_NAME
+
+if [[ -z "$NOGZIP" ]]; then
+  gzip $BACKUP_FILE_NAME
+  FINAL_FILE_NAME=$BACKUP_FILE_NAME.gz
+fi
+
+${aws_command} s3 cp $FINAL_FILE_NAME s3://$S3_BUCKET_PATH/$S3_DIRECTORY_PATH/$BACKUP_FILE_NAME.gz
+
+echo "backup $FINAL_FILE_NAME complete"
 
 if [[ -n "$HEARTBEAT_URL" ]]; then
   echo "Sending a request to the specified HEARTBEAT_URL that the backup was created"
